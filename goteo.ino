@@ -1,52 +1,72 @@
 // Incluimos librería
 #include <DHT.h>
- 
-#define DHTPIN 12
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
 #define DHTTYPE DHT11
- 
+#define OLED_RESET 4
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+
+#define DHTPIN 12
+#define ALERT_LED_PIN 5      // Orange
+#define STATUS_LED_PIN 6     // Yellow
+#define WORKING_LED_PIN 7    // Red
+#define WATER_ENGINE_PIN 8   // Blue
+#define BUTTON_PIN 11        // Blue
+#define TRIGGER_PIN 2        // Orange
+#define ECHO_PIN 3           // Green
+
+#define AIR_VALUE_REFERENCE 581
+#define WATER_VALUE_REFERENCE 293
+#define MAX_WATER_DISTANCE_CM 4
+#define WORKING_INTERVAL_MS 5000
+#define WORKING_ENGINE_INTERVAL_MS 60000
+
+Adafruit_SSD1306 display(OLED_RESET);
 DHT dht(DHTPIN, DHTTYPE);
-
-const int Trigger = 2; // Orange
-const int Echo = 3;   // Green
-
-const int AirValue = 581;   
-const int WaterValue = 293;
-
-const int maxWaterDistanceCm = 4;
-
-const int AlertLedPin = 5;  // Orange
-const int StatusLedPin = 6; // Yellow
-const int WorkingLedPin = 7;  // Red
-const int WaterEnginePin = 4; // Blue
-
-const int ButtonPin = 13;
-
-const long WorkIntervalMs = 30000;
 
 void setup() {
   Serial.begin(9600);
 
-  pinMode(AlertLedPin, OUTPUT); 
-  pinMode(StatusLedPin, OUTPUT); 
-  pinMode(WorkingLedPin, OUTPUT); 
-  pinMode(WaterEnginePin, OUTPUT); 
-
-  pinMode(ButtonPin, INPUT);
-
-
-  pinMode(Trigger, OUTPUT); 
-  pinMode(Echo, INPUT);  
-  digitalWrite(Trigger, LOW);
-  digitalWrite(WaterEnginePin, HIGH);
+  pinMode(ALERT_LED_PIN, OUTPUT); 
+  pinMode(STATUS_LED_PIN, OUTPUT); 
+  pinMode(WORKING_LED_PIN, OUTPUT); 
+  pinMode(WATER_ENGINE_PIN, OUTPUT); 
+  pinMode(BUTTON_PIN, INPUT);
+  pinMode(TRIGGER_PIN, OUTPUT); 
+  pinMode(ECHO_PIN, INPUT);  
+  
+  digitalWrite(TRIGGER_PIN, LOW);
+  digitalWrite(WATER_ENGINE_PIN, HIGH);
 
   dht.begin();
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+  display.display();
+  delay(2000);
+  display.clearDisplay();
 }
 
 int workingMode = 0;
 
+unsigned long currentMillis = 0;
+unsigned long previousEngineIntervalMillis = 0;
+
 void loop() {
-  workingLed(StatusLedPin, 5);
-  int button = digitalRead(ButtonPin);
+ 
+  currentMillis = millis();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  
+  workingLed(STATUS_LED_PIN, 3);
+  int button = digitalRead(BUTTON_PIN);
   Serial.print("Boton: ");
   Serial.print(button);
   Serial.print(" - WorkingMode: ");
@@ -54,139 +74,79 @@ void loop() {
   Serial.println();
 
   if (button) workingMode = !workingMode;
+  
   float temp = checkTemp();
   float humidity = checkHumidity();
   float realTemp = checkRealTemp(temp, humidity);
+  int waterDistance = checkWaterDistance();
+  int soilHumidity = checkSoil();
+  int soilHumidityGoal = checkSoilHumidityGoal();
+  
+  display.clearDisplay();
 
+  display.print("Mode : ");
+  display.println(workingMode); 
+  display.display();
+
+  display.print("Temp : ");
+  display.println(realTemp); 
+  display.display();
+  
+  display.print("Humd : ");
+  display.println(humidity); 
+  display.display();
+
+  display.print("Water: ");
+  display.println(waterDistance);     
+  display.display();
+
+  display.print("Soil : ");
+  display.print(soilHumidity);
+  display.print(" --> ");
+  display.println(soilHumidityGoal);
+  display.display();
+  
   if (workingMode) {
-    int waterDistance = checkWaterDistance();
-    int soilHumidity = checkSoil();
-    
-    if (waterDistance >= maxWaterDistanceCm) {
-      digitalWrite(WaterEnginePin, HIGH);
-      digitalWrite(AlertLedPin, HIGH);
+    if (waterDistance >= MAX_WATER_DISTANCE_CM) {
+      digitalWrite(WATER_ENGINE_PIN, HIGH);
+      digitalWrite(ALERT_LED_PIN, HIGH);
     } else {
-      digitalWrite(AlertLedPin, LOW);
-      int soilHumidityGoal = checkSoilHumidityGoal();
+      digitalWrite(ALERT_LED_PIN, LOW);
+  
 
-      if (soilHumidity < soilHumidityGoal) {
-        digitalWrite(WaterEnginePin, LOW);
-        workingLed(WorkingLedPin, 5);
-        digitalWrite(WaterEnginePin, HIGH);
-      } else {
-        digitalWrite(WorkingLedPin, LOW);
-        digitalWrite(WaterEnginePin, HIGH);
-      }
+      engineCheckAndWork(soilHumidity, soilHumidityGoal);
     }
   } else {
-      workingLed(AlertLedPin, 5);
+      workingLed(ALERT_LED_PIN, 2);
   }
 
-  
-  delay(WorkIntervalMs);
+  delay(WORKING_INTERVAL_MS);
 }
 
-int checkSoilHumidityGoal() {  
-  int val = analogRead(A1);
-  int soilHumidityGoal = map(val, 0, 1023, 0, 100);
+void engineCheckAndWork(int soilHumidity, int soilHumidityGoal) {
+  unsigned long delta = (unsigned long)(currentMillis - previousEngineIntervalMillis);
+  int times = (delta * 18) / WORKING_ENGINE_INTERVAL_MS;
+  if(times > 18) times = 18;
+   
+  Serial.println(times);
 
-  Serial.print("Agua Tierra Objetivo: ");
-  Serial.print(soilHumidityGoal);
-  Serial.print(" %");
-  Serial.println();
-
-  return soilHumidityGoal;
-}
-
-void workingLed(int led, int times) {
+  display.println("Engine:");
+  display.print("[");
   for(int i=0; i < times; i++) {
-    digitalWrite(led, HIGH);
-    delay(500);
-    digitalWrite(led, LOW);
-    delay(500);
+    display.print("=");
+    display.display();
   }
-}
+  display.print(">");
+  for(int i=0; i < 18 - times; i++) display.print(" ");
+  display.println("]");
+  display.display();
 
-int checkSoil() {
-  int soilMoistureValue = 0;
-  int soilmoisturepercent = 0;
-  soilMoistureValue = analogRead(A0);
-  soilmoisturepercent = map(soilMoistureValue, AirValue, WaterValue, 0, 100);
-  if(soilmoisturepercent > 100)
-  {
-    soilmoisturepercent = 100;
+  if (delta >= WORKING_ENGINE_INTERVAL_MS) {
+    if (soilHumidity < soilHumidityGoal) {
+        digitalWrite(WATER_ENGINE_PIN, LOW);
+        workingLed(WORKING_LED_PIN, 5);
+        digitalWrite(WATER_ENGINE_PIN, HIGH);
+        previousEngineIntervalMillis = millis();
+    }
   }
-  else if(soilmoisturepercent <0)
-  {
-    soilmoisturepercent = 0;
-  }
-
-  Serial.print("Agua Tierra: ");
-  Serial.print(soilmoisturepercent);
-  Serial.println("%");
-
-  return soilmoisturepercent;
-}
-
-int checkWaterDistance() {
-  long t;
-  long d;
-  
-  digitalWrite(Trigger, HIGH);
-  delayMicroseconds(10);      
-  digitalWrite(Trigger, LOW);
-
-  t = pulseIn(Echo, HIGH); 
-  d = t/59;                
-  
-  Serial.print("Distancia: ");
-  Serial.print(d);
-  Serial.print("cm");
-  Serial.println();
-
-  return d;
-}
-
-float checkRealTemp(float temp, float humidity) {
-  float hic = dht.computeHeatIndex(temp, humidity, false);
-  Serial.print("Sensacion termica: ");
-  Serial.print(hic);
-  Serial.print(" ºC ");
-  Serial.println();
-
-  return hic;
-}
-
-float checkHumidity() {
-  float h = dht.readHumidity();
- 
-  if (isnan(h)) {
-    Serial.println("Error obteniendo los datos del sensor DHT11: Humidity");
-    return 0.00;
-  }
- 
-  Serial.print("Humedad: ");
-  Serial.print(h);
-  Serial.print(" % ");
-  Serial.println();
-
-  return h;
-}
-
-
-float checkTemp() {
-  float t = dht.readTemperature();
- 
-  // Comprobamos si ha habido algún error en la lectura
-  if (isnan(t)) {
-    Serial.println("Error obteniendo los datos del sensor DHT11: Temperature");
-    return 0.00;
-  }
-    
-  Serial.print("Temperatura: ");
-  Serial.print(t);
-  Serial.print(" ºC ");
-  Serial.println();
-
-  return t;
 }
