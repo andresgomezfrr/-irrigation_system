@@ -1,3 +1,31 @@
+unsigned long printEngineBar() {
+  unsigned long delta = (unsigned long)(currentMillis - previousEngineIntervalMillis);
+  int times = (delta * 18) / WORKING_ENGINE_INTERVAL_MS;
+  if(times > 18) times = 18;
+   
+  Serial.println(times);
+
+  display.println("Engine:");
+  display.print("[");
+  for(int i=0; i < times; i++) {
+    display.print("=");
+    display.display();
+  }
+  display.print(">");
+  for(int i=0; i < 18 - times; i++) display.print(" ");
+  display.println("]");
+  display.display();
+
+  return delta;
+}
+
+int checkButton() {
+  int value = digitalRead(BUTTON_PIN);
+  Serial.print("Boton: ");
+  Serial.print(value);
+  return value;
+}
+
 int checkSoil() {
   int soilMoistureValue = 0;
   int soilmoisturepercent = 0;

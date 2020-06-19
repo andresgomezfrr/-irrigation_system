@@ -1,6 +1,5 @@
 // Incluimos librería
 #include <DHT.h>
-#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -16,7 +15,7 @@
 #define ALERT_LED_PIN 5      // Orange
 #define STATUS_LED_PIN 6     // Yellow
 #define WORKING_LED_PIN 7    // Red
-#define WATER_ENGINE_PIN 8   // Blue
+#define WATER_ENGINE_PIN 4   // Blue
 #define BUTTON_PIN 11        // Blue
 #define TRIGGER_PIN 2        // Orange
 #define ECHO_PIN 3           // Green
@@ -24,8 +23,8 @@
 #define AIR_VALUE_REFERENCE 581
 #define WATER_VALUE_REFERENCE 293
 #define MAX_WATER_DISTANCE_CM 4
-#define WORKING_INTERVAL_MS 5000
-#define WORKING_ENGINE_INTERVAL_MS 60000
+#define WORKING_INTERVAL_MS 600000
+#define WORKING_ENGINE_INTERVAL_MS 3600000
 
 Adafruit_SSD1306 display(OLED_RESET);
 DHT dht(DHTPIN, DHTTYPE);
@@ -47,7 +46,6 @@ void setup() {
   dht.begin();
 
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-
   display.display();
   delay(2000);
   display.clearDisplay();
@@ -66,24 +64,17 @@ void loop() {
   display.setCursor(0,0);
   
   workingLed(STATUS_LED_PIN, 3);
-  int button = digitalRead(BUTTON_PIN);
-  Serial.print("Boton: ");
-  Serial.print(button);
-  Serial.print(" - WorkingMode: ");
-  Serial.print(workingMode);
-  Serial.println();
-
-  if (button) workingMode = !workingMode;
-  
+  int button = checkButton();  
   float temp = checkTemp();
   float humidity = checkHumidity();
   float realTemp = checkRealTemp(temp, humidity);
   int waterDistance = checkWaterDistance();
   int soilHumidity = checkSoil();
   int soilHumidityGoal = checkSoilHumidityGoal();
+
+  if (button) workingMode = !workingMode;
   
   display.clearDisplay();
-
   display.print("Mode : ");
   display.println(workingMode); 
   display.display();
@@ -112,8 +103,6 @@ void loop() {
       digitalWrite(ALERT_LED_PIN, HIGH);
     } else {
       digitalWrite(ALERT_LED_PIN, LOW);
-  
-
       engineCheckAndWork(soilHumidity, soilHumidityGoal);
     }
   } else {
@@ -124,27 +113,12 @@ void loop() {
 }
 
 void engineCheckAndWork(int soilHumidity, int soilHumidityGoal) {
-  unsigned long delta = (unsigned long)(currentMillis - previousEngineIntervalMillis);
-  int times = (delta * 18) / WORKING_ENGINE_INTERVAL_MS;
-  if(times > 18) times = 18;
-   
-  Serial.println(times);
-
-  display.println("Engine:");
-  display.print("[");
-  for(int i=0; i < times; i++) {
-    display.print("=");
-    display.display();
-  }
-  display.print(">");
-  for(int i=0; i < 18 - times; i++) display.print(" ");
-  display.println("]");
-  display.display();
+  unsigned long delta = printEngineBar();
 
   if (delta >= WORKING_ENGINE_INTERVAL_MS) {
     if (soilHumidity < soilHumidityGoal) {
         digitalWrite(WATER_ENGINE_PIN, LOW);
-        workingLed(WORKING_LED_PIN, 5);
+        workingLed(WORKING_LED_PIN, 30    );
         digitalWrite(WATER_ENGINE_PIN, HIGH);
         previousEngineIntervalMillis = millis();
     }
